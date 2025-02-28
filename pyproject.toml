@@ -1,0 +1,12 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "krcps"
+version = "0.0.1"
+authors = [
+  { name="Jacopo Teneggi", email="jtenegg1@jhu.edu" },
+]
+description = "Conformal risk control with length optimization"
+readme = "README.md"
