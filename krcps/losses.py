@@ -1,41 +1,125 @@
-import cvxpy as cp
-import torch
+from abc import abstractmethod
+from typing import Mapping, Optional
 
-from .utils import register_loss
+import torch
+import torch.nn.functional as F
+
+
+class IntervalLoss:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    @abstractmethod
+    def __call__(
+        self, target: torch.Tensor, l: torch.Tensor, u: torch.Tensor
+    ) -> torch.Tensor:
+        pass
+
+
+losses: Mapping[str, IntervalLoss] = {}
+
+
+def register_loss(name: str):
+    def register(cls: IntervalLoss):
+        losses[name] = cls
+        return cls
+
+    return register
+
+
+def get_loss(name: str, **kwargs) -> IntervalLoss:
+    return losses[name](**kwargs)
+
+
+@register_loss(name="vector_mse")
+class VectorMSELoss(IntervalLoss):
+    def __init__(self):
+        super().__init__()
+
+    def __call__(
+        self,
+        target: torch.Tensor,
+        l: torch.Tensor,
+        u: torch.Tensor,
+        reduction="mean",
+        dim=0,
+    ):
+        c = (l + u) / 2
+        loss = torch.pow(target - c, 2)
+
+        if reduction == "mean":
+            return torch.mean(loss, dim=dim)
+        elif reduction == "none":
+            return loss
+        else:
+            raise ValueError(f"Unknown reduction {reduction}")
 
 
 @register_loss(name="vector_01")
-def _01_vector_loss(target, l, u, reduction="mean", dim=0):
-    loss = torch.where(torch.logical_and(target >= l, target <= u), 0.0, 1.0)
-    if reduction == "mean":
-        return torch.mean(loss, dim=dim)
-    elif reduction == "none":
-        return loss
-    else:
-        raise ValueError(f"Unknown reduction {reduction}")
+class VectorO1Loss(IntervalLoss):
+    def __init__(self):
+        super().__init__()
+
+    def __call__(
+        self,
+        target: torch.Tensor,
+        l: torch.Tensor,
+        u: torch.Tensor,
+        segmentation: Optional[torch.Tensor] = None,
+        reduction="mean",
+        dim=0,
+    ):
+        if segmentation is not None:
+            m = F.one_hot(segmentation.long()).float()
+            l = m * l[..., None]
+            u = m * u[..., None]
+            target = m * target[..., None]
+
+        loss = torch.where(torch.logical_and(target >= l, target <= u), 0.0, 1.0)
+
+        if reduction == "mean":
+            return torch.mean(loss, dim=dim)
+        elif reduction == "none":
+            return loss
+        else:
+            raise ValueError(f"Unknown reduction {reduction}")
 
 
 @register_loss(name="01")
-def _01_loss(target, l, u):
-    vector_loss = _01_vector_loss(target, l, u, reduction="none")
-    return torch.mean(vector_loss)
+class Interval01Loss(VectorO1Loss):
+    def __init__(self):
+        super().__init__()
+
+    def __call__(
+        self, target: torch.Tensor, l: torch.Tensor, u: torch.Tensor
+    ) -> torch.Tensor:
+        loss = super().__call__(target, l, u, reduction="none")
+        return torch.mean(loss)
 
 
-@register_loss(name="vector_gamma")
-def _gamma_vector_loss(target, l, u, gamma=0.5, reduction="mean", dim=0):
-    if gamma < 0 or gamma >= 1:
-        raise ValueError(f"Gamma must be in [0, 1), got {gamma}")
-    q = gamma / (1 - gamma)
+@register_loss(name="sem_01")
+class Sem01Loss(IntervalLoss):
+    def __init__(self, segmentation: torch.Tensor = None, target: torch.Tensor = None):
+        super().__init__()
+        self.m = F.one_hot(segmentation.long()).float()
+        self.target = self.m * target[..., None]
 
-    c = (l + u) / 2
-    i = u - l
-    offset = torch.abs(target - c)
+        self.norm = torch.sum(self.m.view(-1, self.m.size(-1)), dim=0)
+        self.mask = self.norm == 0
 
-    loss = 2 * (1 + q) / i * offset - q
-    loss = torch.clamp(loss, min=0)
-    if reduction == "mean":
-        return torch.mean(loss, dim=dim)
-    elif reduction == "none":
-        return loss
-    else:
-        raise ValueError(f"Unknown reduction {reduction}")
+    def __call__(
+        self,
+        l: torch.Tensor,
+        u: torch.Tensor,
+    ):
+        l = self.m * l[..., None]
+        u = self.m * u[..., None]
+
+        loss = torch.where(
+            torch.logical_and(self.target >= l, self.target <= u), 0.0, 1.0
+        )
+        loss = loss.view(-1, self.m.size(-1))
+        loss = torch.sum(loss, dim=0) / (self.norm + 1e-08)
+
+        mask = self.mask.float()
+        return mask * -1 + (1 - mask) * loss
