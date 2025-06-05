@@ -8,16 +8,14 @@ import torch.nn.functional as F
 def _normalize(
     l: torch.Tensor,
     u: torch.Tensor,
-    norm_min: float = 0.0,
-    norm_max: float = 1.0,
-    norm_eps: Optional[float] = None,
+    min: float = 0.0,
+    max: float = 1.0,
+    eps: Optional[float] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    l, u = torch.clamp(l, min=norm_min, max=norm_max), torch.clamp(
-        u, min=norm_min, max=norm_max
-    )
-    if norm_eps is not None:
-        l[l <= norm_eps] = 0.0
-        u[u <= norm_eps] = 0.0
+    l, u = torch.clamp(l, min=min, max=max), torch.clamp(u, min=min, max=max)
+    if eps is not None:
+        l[l <= eps] = 0.0
+        u[u <= eps] = 0.0
     return l, u
 
 
@@ -46,17 +44,18 @@ def _calibrated_quantile(
 class UncertaintyQuantification:
     def __init__(
         self,
-        norm_min: float = 0.0,
-        norm_max: float = 1.0,
-        norm_eps: Optional[float] = None,
+        min: float = 0.0,
+        max: float = 1.0,
+        eps: Optional[float] = None,
         segmentation: Optional[torch.Tensor] = None,
+        num_classes: int = -1,
     ):
-        self.norm_min = norm_min
-        self.norm_max = norm_max
-        self.norm_eps = norm_eps
+        self.min = min
+        self.max = max
+        self.eps = eps
         self.m = None
         if segmentation is not None:
-            self.m = F.one_hot(segmentation.long()).float()
+            self.m = F.one_hot(segmentation.long(), num_classes=num_classes).float()
 
     @abstractmethod
     def _I(self, _lambda: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -67,9 +66,9 @@ class UncertaintyQuantification:
             _lambda = torch.matmul(self.m, _lambda)
         return _normalize(
             *self._I(_lambda),
-            norm_min=self.norm_min,
-            norm_max=self.norm_max,
-            norm_eps=self.norm_eps,
+            min=self.min,
+            max=self.max,
+            eps=self.eps,
         )
 
 
@@ -90,8 +89,8 @@ def get_uq(name: str):
 
 @register_uq(name="mse")
 class MSE(UncertaintyQuantification):
-    def __init__(self, denoised: torch.Tensor, **norm_kwargs):
-        super().__init__(**norm_kwargs)
+    def __init__(self, denoised: torch.Tensor, **uq_kwargs):
+        super().__init__(**uq_kwargs)
         self.mse = denoised[:, 1]
 
     def _I(self, _lambda: torch.Tensor):
@@ -102,8 +101,8 @@ class MSE(UncertaintyQuantification):
 
 @register_uq(name="qr_additive")
 class AdditiveQuantileRegression(UncertaintyQuantification):
-    def __init__(self, denoised: torch.Tensor, **norm_kwargs):
-        super().__init__(**norm_kwargs)
+    def __init__(self, denoised: torch.Tensor, **uq_kwargs):
+        super().__init__(**uq_kwargs)
         _l, _u = denoised[:, 0], denoised[:, 2]
         l, u = torch.minimum(_l, _u), torch.maximum(_l, _u)
         assert torch.all(u - l >= 0)
@@ -117,8 +116,8 @@ class AdditiveQuantileRegression(UncertaintyQuantification):
 
 @register_uq(name="qr_multiplicative")
 class MultiplicativeQuantileRegression(UncertaintyQuantification):
-    def __init__(self, denoised: torch.Tensor, **norm_kwargs):
-        super().__init__(**norm_kwargs)
+    def __init__(self, denoised: torch.Tensor, **uq_kwargs):
+        super().__init__(**uq_kwargs)
         _l, x, _u = denoised[:, 0], denoised[:, 1], denoised[:, 2]
 
         q_eps = 1e-02
@@ -134,8 +133,8 @@ class MultiplicativeQuantileRegression(UncertaintyQuantification):
 
 @register_uq(name="std")
 class STD(UncertaintyQuantification):
-    def __init__(self, sampled: torch.Tensor, dim: Optional[int] = None, **norm_kwargs):
-        super().__init__(**norm_kwargs)
+    def __init__(self, sampled: torch.Tensor, dim: Optional[int] = None, **uq_kwargs):
+        super().__init__(**uq_kwargs)
         mu, _std = torch.mean(sampled, dim=dim), torch.std(sampled, dim=dim)
 
         std_min = 1e-02
@@ -156,9 +155,9 @@ class NaiveSamplingAdditive(UncertaintyQuantification):
         sampled: torch.Tensor,
         alpha: float = None,
         dim: Optional[int] = None,
-        **norm_kwargs,
+        **uq_kwargs,
     ):
-        super().__init__(**norm_kwargs)
+        super().__init__(**uq_kwargs)
         q = torch.quantile(sampled, torch.tensor([alpha / 2, 1 - alpha / 2]), dim=dim)
         self.l, self.u = q[0], q[1]
 
@@ -175,9 +174,9 @@ class CalibratedQuantile(UncertaintyQuantification):
         sampled: torch.Tensor,
         alpha: float = None,
         dim: Optional[int] = None,
-        **norm_kwargs,
+        **uq_kwargs,
     ):
-        super().__init__(**norm_kwargs)
+        super().__init__(**uq_kwargs)
         l, u = _calibrated_quantile(sampled, alpha, dim=dim)
         self.l, self.u = l, u
 
@@ -189,8 +188,8 @@ class CalibratedQuantile(UncertaintyQuantification):
 
 @register_uq(name="conffusion_multiplicative")
 class MultiplicativeConffusion(UncertaintyQuantification):
-    def __init__(self, denoised: torch.Tensor, **norm_kwargs):
-        super().__init__(**norm_kwargs)
+    def __init__(self, denoised: torch.Tensor, **uq_kwargs):
+        super().__init__(**uq_kwargs)
         _l, _u = denoised[:, 0], denoised[:, 2]
         l, u = torch.minimum(_l, _u), torch.maximum(_l, _u)
         assert torch.all(u - l >= 0)
@@ -204,8 +203,8 @@ class MultiplicativeConffusion(UncertaintyQuantification):
 
 @register_uq(name="conffusion_additive")
 class AdditiveConffusion(UncertaintyQuantification):
-    def __init__(self, denoised: torch.Tensor, **norm_kwargs):
-        super().__init__(**norm_kwargs)
+    def __init__(self, denoised: torch.Tensor, **uq_kwargs):
+        super().__init__(**uq_kwargs)
         _l, _u = denoised[:, 0], denoised[:, 2]
         l, u = torch.minimum(_l, _u), torch.maximum(_l, _u)
         assert torch.all(u - l >= 0)

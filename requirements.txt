@@ -1,0 +1,5 @@
+scipy
+ml_collections
+scikit-image
+cvxpy
+tqdm

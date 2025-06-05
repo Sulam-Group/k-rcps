@@ -132,7 +132,6 @@ class kRCPS(CalibrationProcedure):
         self,
         ground_truth: torch.Tensor,
         prediction: torch.Tensor,
-        uq_dict: Mapping[str, UncertaintyQuantification] = {},
         eta: Optional[torch.Tensor] = None,
     ):
         n = ground_truth.size(0)
@@ -150,8 +149,8 @@ class kRCPS(CalibrationProcedure):
             prediction[cal_idx],
         )
 
-        opt_uq = self.uq(opt_prediction, **uq_dict, **self.norm)
-        cal_uq = self.uq(cal_prediction, **uq_dict, **self.norm)
+        opt_uq = self.uq(opt_prediction, **self.norm)
+        cal_uq = self.uq(cal_prediction, **self.norm)
 
         pk = Pk(
             ground_truth=opt_ground_truth,
