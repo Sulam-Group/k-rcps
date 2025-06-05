@@ -68,7 +68,6 @@ class RPCS(CalibrationProcedure):
         self,
         ground_truth: torch.Tensor,
         prediction: torch.Tensor,
-        uq_dict: Mapping[str, Any] = {},
         eta: Optional[torch.Tensor] = None,
     ):
         logger.info(f"Running RCPS with n_cal={len(ground_truth)}")
@@ -76,7 +75,7 @@ class RPCS(CalibrationProcedure):
         _lambda = torch.tensor(self.lambda_max)
         return _rcps(
             ground_truth=ground_truth,
-            uq_fn=self.uq(prediction, **uq_dict, **self.norm),
+            uq_fn=self.uq(prediction, **self.norm),
             loss_fn=self.loss,
             bound=self.bound,
             epsilon=self.epsilon,

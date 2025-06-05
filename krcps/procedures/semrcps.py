@@ -161,7 +161,6 @@ class semRCPS(CalibrationProcedure):
         ground_truth: torch.Tensor,
         reconstruction: torch.Tensor,
         segmentation: torch.Tensor,
-        uq_dict: Mapping[str, Any] = {},
         eta: Optional[torch.Tensor] = None,
     ):
         n = ground_truth.size(0)
@@ -187,8 +186,8 @@ class semRCPS(CalibrationProcedure):
             segmentation[cal_idx],
         )
 
-        opt_uq = self.uq(opt_reconstruction, opt_segmentation, **uq_dict, **self.norm)
-        cal_uq = self.uq(cal_reconstruction, cal_segmentation, **uq_dict, **self.norm)
+        opt_uq = self.uq(opt_reconstruction, **self.norm, segmentation=opt_segmentation)
+        cal_uq = self.uq(cal_reconstruction, **self.norm, segmentation=cal_segmentation)
 
         pk = semPk(
             ground_truth=opt_ground_truth,

@@ -1,12 +1,19 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "krcps"
 version = "0.0.1"
-authors = [
-  { name="Jacopo Teneggi", email="jtenegg1@jhu.edu" },
-]
+requires-python = ">=3.10"
+dynamic = ["dependencies"]
 description = "Conformal risk control with length optimization"
 readme = "README.md"
+authors = [{ name = "Jacopo Teneggi", email = "jtenegg1@jhu.edu" }]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["krcps"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }

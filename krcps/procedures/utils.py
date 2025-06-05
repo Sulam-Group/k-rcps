@@ -21,9 +21,9 @@ class CalibrationProcedure:
         self.stepsize = config.stepsize
 
         self.norm = {
-            "norm_min": config.norm_min,
-            "norm_max": config.norm_max,
-            "norm_eps": config.norm_eps,
+            "min": config.norm_min,
+            "max": config.norm_max,
+            "eps": config.norm_eps,
         }
 
     @abstractmethod
